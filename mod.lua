@@ -1,3 +1,6 @@
+local XAudio = XAudio
+local file_handler = file
+
 local FlashBangMemeger = class()
 
 FlashBangMemeger.DEBUG = io.file_is_readable(ModPath .. "developer.txt") or false -- for flashbang makers
@@ -5,7 +8,7 @@ FlashBangMemeger.DEBUG = io.file_is_readable(ModPath .. "developer.txt") or fals
 FlashBangMemeger.ASSETS_PATH = "mods/FlashBang Packs/"
 FlashBangMemeger.SOFT_PATH = "gui/interface/MemeBangs/"
 
--- for loging
+-- for logging
 FlashBangMemeger.MOD_NAME = "Random Flashes"
 FlashBangMemeger.ERRORS = {
 	ASSETS_PATH_MISSING = "Pack directory not found @"
@@ -72,19 +75,19 @@ function FlashBangMemeger:init()
 end
 
 function FlashBangMemeger:load_meta_files()
-	if not FileIO:Exists(self.ASSETS_PATH) then
+	if not file_handler.DirectoryExists(self.ASSETS_PATH) then
 		self:log("error", self.ERRORS.ASSETS_PATH_MISSING)
 		return
 	end
 
-	for _, folder in pairs(file.GetDirectories(self.ASSETS_PATH)) do
+	for _, folder in ipairs(file_handler.GetDirectories(self.ASSETS_PATH)) do
 		local current_path = self.ASSETS_PATH .. folder .. "/"
 		if io.file_is_readable(current_path .. "meta.json") then
 			local flash_list = {}
-			local file = io.open(current_path .. "meta.json", "r")
-			if file then
-				flash_list = json.decode(file:read("*all"))
-				file:close()
+			local f = io.open(current_path .. "meta.json", "r")
+			if f then
+				flash_list = json.decode(f:read("*all"))
+				f:close()
 			end
 
 			if not flash_list then
@@ -103,35 +106,32 @@ function FlashBangMemeger:load_meta_files()
 end
 
 function FlashBangMemeger:process_meta_files()
-	for _, meta in pairs(self.METADATA) do
-		if not next(meta.flash_list) then
+	for _, meta in ipairs(self.METADATA) do
+		if next(meta.flash_list) then
+			for _, flash_data in ipairs(meta.flash_list) do
+				local textures, movies, sounds
+
+				if flash_data.textures then
+					textures = self:load_assets(meta.id, meta.path, flash_data.textures, Idstring("texture"))
+				end
+
+				if flash_data.movies then
+					movies = self:load_assets(meta.id, meta.path, flash_data.movies, Idstring("movie"))
+				end
+
+				if flash_data.sounds then
+					sounds = self:load_assets(meta.id, meta.path, flash_data.sounds)
+				end
+
+				if textures or movies then
+					table.insert(self.FLASHBANGS, { textures = textures, movies = movies, sounds = sounds })
+				else
+					self:log("warning", self.WARNINGS.EMPTY_ASSETS:format(meta.id))
+				end
+			end
+		else
 			self:log("warning", self.WARNINGS.EMPTY_META:format(meta.id))
-			goto next_item
 		end
-
-		for _, flash_data in pairs(meta.flash_list) do
-			local textures, movies, sounds
-
-			if flash_data.textures then
-				textures = self:load_assets(meta.id, meta.path, flash_data.textures, Idstring("texture"))
-			end
-
-			if flash_data.movies then
-				movies = self:load_assets(meta.id, meta.path, flash_data.movies, Idstring("movie"))
-			end
-
-			if flash_data.sounds then
-				sounds = self:load_assets(meta.id, meta.path, flash_data.sounds)
-			end
-
-			if textures or movies then
-				table.insert(self.FLASHBANGS, { textures = textures, movies = movies, sounds = sounds })
-			else
-				self:log("warning", self.WARNINGS.EMPTY_ASSETS:format(meta.id))
-			end
-		end
-
-		::next_item::
 	end
 
 	if not next(self.FLASHBANGS) then
@@ -159,10 +159,13 @@ local ext_translations = {
 }
 function FlashBangMemeger:load_assets(flash_id, path, asset_list, asset_type)
 	local path_list = {}
-	for _, asset in pairs(asset_list) do
+	for _, asset in ipairs(asset_list) do
 		local file_found
-		for _, extension in pairs((asset_type and ext_list[asset_type:key()]) or ext_list.sounds) do
-			for _, prefix in pairs((asset_type and dir_ext[asset_type:key()]) or dir_ext.sounds) do
+		local key = asset_type and asset_type:key() or "sounds"
+		local extensions = ext_list[key]
+		local prefixes = dir_ext[key]
+		for _, extension in ipairs(extensions) do
+			for _, prefix in ipairs(prefixes) do
 				local file_path = path .. prefix .. asset .. extension
 				local soft_path = self.SOFT_PATH .. flash_id .. "/" .. asset
 				if io.file_is_readable(file_path) then
@@ -179,8 +182,8 @@ function FlashBangMemeger:load_assets(flash_id, path, asset_list, asset_type)
 		end
 
 		if not file_found then
-			local type = asset_type and ext_translations[asset_type:key()] or "sound"
-			self:log("warning", self.WARNINGS.ASSET_FILE_NOT_FOUND:format(type, asset, path))
+			local asset_name = asset_type and ext_translations[asset_type:key()] or "sound"
+			self:log("warning", self.WARNINGS.ASSET_FILE_NOT_FOUND:format(asset_name, asset, path))
 		end
 
 		::next_asset::
@@ -232,15 +235,8 @@ function FlashBangMemeger:play_audio(file)
 end
 
 function FlashBangMemeger:stop_audio()
-	if self.audio_buffer then
-		-- self.audio_buffer:close(true)
-		-- self.audio_buffer = nil
-	end
-
 	if self.audio_source and not self.audio_source:is_closed() then
 		self.audio_source:stop()
-		-- self.audio_source:close(true)
-		-- self.audio_source = nil
 	end
 end
 
@@ -257,7 +253,13 @@ function FlashBangMemeger:setup_panel()
 
 	local hud = managers.hud:script(_G.PlayerBase.PLAYER_INFO_HUD_FULLSCREEN_PD2)
 
-	self.panel = hud and hud.panel or self._ws:panel({ name = "MemeBangPanel" })
+	if hud and hud.panel then
+		self.panel = hud.panel
+	end
+
+	if not self.panel then
+		self:log("warning", "HUD panel unavailable")
+	end
 end
 
 function FlashBangMemeger:set_visual(type, path)
@@ -295,8 +297,9 @@ function FlashBangMemeger:remove_current_visuals(skip_anim)
 		end
 
 		self.bitmap:animate(function(o)
+			local start_alpha = o:alpha()
 			animate_ui(1, function(p)
-				o:set_alpha(math.lerp(o:alpha(), 0, p))
+				o:set_alpha(math.lerp(start_alpha, 0, p))
 			end)
 
 			o:set_alpha(0)
@@ -313,8 +316,9 @@ function FlashBangMemeger:remove_current_visuals(skip_anim)
 		end
 
 		self.video:animate(function(o)
+			local start_alpha = o:alpha()
 			animate_ui(1, function(p)
-				o:set_alpha(math.lerp(o:alpha(), 0, p))
+				o:set_alpha(math.lerp(start_alpha, 0, p))
 			end)
 
 			o:set_alpha(0)
@@ -324,9 +328,20 @@ function FlashBangMemeger:remove_current_visuals(skip_anim)
 	end
 end
 
+function FlashBangMemeger:stop_flash(skip_anim)
+	if not alive(self.panel) then
+		return
+	end
+
+	self:stop_audio()
+	self:remove_current_visuals(skip_anim)
+end
+
 function FlashBangMemeger:set_alpha(alpha)
+	alpha = math.max(alpha, 0)
+
 	if alive(self.bitmap) then
-		self.bitmap:set_alpha(math.max(alpha, 0))
+		self.bitmap:set_alpha(alpha)
 	end
 
 	if alive(self.video) then
@@ -373,7 +388,7 @@ end
 if RequiredScript == "lib/units/beings/player/playerdamage" then
 	Hooks:PostHook(PlayerDamage, "update", "MemeBangs:PlayerDamage.update", function(self)
 		if not managers.environment_controller then
-			managers.memebangs:remove_current_visuals()
+			managers.memebangs:stop_flash(true)
 			return
 		end
 
@@ -385,16 +400,19 @@ if RequiredScript == "lib/units/beings/player/playerdamage" then
 
 		local flashbang_progress = managers.environment_controller._current_flashbang
 		if not flashbang_progress then
+			managers.memebangs:stop_flash()
 			return
 		end
-
+		
 		flashbang_progress = math.clamp(tonumber(flashbang_progress), 0, 1)
-
+		
 		if visual_fade_out then
 			managers.memebangs:set_alpha(flashbang_progress)
 		end
-
-		if not managers.memebangs.audio_source or managers.memebangs.audio_source:is_closed() or not managers.memebangs.audio_source:is_active() then
+		
+		local source = managers.memebangs.audio_source
+		if not source or source:is_closed() or not source:is_active() then
+			managers.memebangs:stop_flash()
 			return
 		end
 
@@ -404,19 +422,17 @@ if RequiredScript == "lib/units/beings/player/playerdamage" then
 	end)
 
 	Hooks:PostHook(PlayerDamage, "_stop_tinnitus", "MemeBangs:PlayerDamage._stop_tinnitus", function(self)
-		managers.memebangs:stop_audio()
-		managers.memebangs:remove_current_visuals()
+		managers.memebangs:stop_flash()
 	end)
 
 	Hooks:PreHook(PlayerDamage, "pre_destroy", "MemeBangs:PlayerDamage.pre_destroy", function(self)
-		managers.memebangs:stop_audio()
-		managers.memebangs:remove_current_visuals()
+		managers.memebangs:stop_flash(true)
 	end)
 end
 
 if RequiredScript == "lib/managers/hudmanager" then
 	local HUDManager = _G["HUDManager"]
-	Hooks:PostHook(HUDManager, "_player_hud_layout", "memebangs:HUDManager._player_hud_layout", function(hudman)
+	Hooks:PostHook(HUDManager, "_player_hud_layout", "MemeBangs:HUDManager._player_hud_layout", function(hudman)
 		managers.memebangs:setup_panel()
 	end)
 end
